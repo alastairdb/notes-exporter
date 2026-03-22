@@ -1,0 +1,22 @@
+[project]
+name = "notes_exporter"
+version = "0.1.0"
+description = "Export Google Keep notes to org-mode format"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "gkeepapi>=0.17.1",
+    "keyring>=25.6.0",
+    "pydantic-settings>=2.10.1",
+    "requests>=2.32.5",
+]
+
+[project.optional-dependencies]
+dev = [
+    "types-requests>=2.32.0",
+    "pytest>=9.0.2",
+    "pytest-mock>=3.15.1",
+]
+
+[project.scripts]
+notes-exporter = "notes_exporter.__main__:main"
