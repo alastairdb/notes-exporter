@@ -5,20 +5,18 @@ with lib;
 let
   cfg = config.services.notes-exporter;
   
-  defaultPackage = pkgs.python3.withPackages (ps: with ps; [ gkeepapi requests ]);
-  
-  notes-export-script = pkgs.writeShellScript "notes-export" ''
-    export GOOGLE_KEEP_EMAIL="${cfg.email}"
-    ${optionalString (cfg.tokenSecret != null) ''
-      export GOOGLE_KEEP_TOKEN="$(cat ${config.age.secrets.${cfg.tokenSecret}.path})"
-    ''}
-    cd "${cfg.workingDirectory}"
-    ${cfg.package}/bin/python ${cfg.scriptPath}
-  '';
+  # Use the notes-exporter package from the flake
+  defaultPackage = pkgs.notes-exporter;
 
 in {
   options.services.notes-exporter = {
     enable = mkEnableOption "Google Keep notes exporter service";
+
+    package = mkOption {
+      type = types.package;
+      default = defaultPackage;
+      description = "The notes-exporter package to use";
+    };
 
     email = mkOption {
       type = types.str;
@@ -26,28 +24,36 @@ in {
       example = "user@gmail.com";
     };
 
-    package = mkOption {
-      type = types.package;
-      default = defaultPackage;
-      description = "Python package with required dependencies";
+    masterToken = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "Google Keep master token (consider using tokenFile instead)";
     };
 
-    scriptPath = mkOption {
-      type = types.path;
-      description = "Path to the export_notes.py script";
+    tokenFile = mkOption {
+      type = types.nullOr types.path;
+      default = null;
+      description = "Path to file containing the Google Keep master token";
+      example = "/run/secrets/google-keep-token";
+    };
+
+    exportLabels = mkOption {
+      type = types.attrsOf types.str;
+      default = {
+        journal = "notes/journal";
+        bookmark = "notes/bookmark";
+      };
+      description = "Labels to export and their output directories";
+      example = {
+        journal = "~/Documents/journal";
+        todo = "~/Documents/todo";
+      };
     };
 
     workingDirectory = mkOption {
       type = types.str;
       default = "${config.home.homeDirectory}/Documents/Notes";
-      description = "Directory where notes files will be saved";
-    };
-
-    tokenSecret = mkOption {
-      type = types.nullOr types.str;
-      default = null;
-      description = "Name of the agenix secret containing the Google Keep token";
-      example = "google-keep-token";
+      description = "Base directory where notes will be exported";
     };
 
     schedule = mkOption {
@@ -62,54 +68,34 @@ in {
       default = "1h";
       description = "Random delay to spread load";
     };
-
-    createDirectory = mkOption {
-      type = types.bool;
-      default = true;
-      description = "Whether to create the working directory";
-    };
-
-    extraEnvironment = mkOption {
-      type = types.attrsOf types.str;
-      default = {};
-      description = "Extra environment variables";
-      example = { PYTHONPATH = "/custom/path"; };
-    };
   };
 
   config = mkIf cfg.enable {
-    # Set environment variables
-    home.sessionVariables = {
-      GKEEPAPI_EMAIL = cfg.email;
-    } // cfg.extraEnvironment;
-
-    # Create working directory
-    home.file = mkIf cfg.createDirectory {
-      "${removePrefix config.home.homeDirectory cfg.workingDirectory}/.keep".text = "";
-    };
-
     # Systemd service
-    systemd.user.services.notes-export = {
+    systemd.user.services.notes-exporter = {
       Unit = {
-        Description = "Export Google Keep notes entries to org-mode";
+        Description = "Export Google Keep notes to org-mode format";
         After = [ "network-online.target" ];
         Wants = [ "network-online.target" ];
       };
 
       Service = {
         Type = "oneshot";
-        ExecStart = "${notes-export-script}";
-        Environment = mapAttrsToList (name: value: "${name}=${value}") ({
-          GKEEPAPI_EMAIL = cfg.email;
-        } // cfg.extraEnvironment);
+        WorkingDirectory = cfg.workingDirectory;
+        ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${cfg.workingDirectory}";
+        ExecStart = "${cfg.package}/bin/notes-exporter --email ${cfg.email}";
+        Environment = 
+          (optional (cfg.masterToken != null) "GOOGLE_KEEP_TOKEN=${cfg.masterToken}") ++
+          [ "GOOGLE_KEEP_EMAIL=${cfg.email}" ];
+        EnvironmentFile = optional (cfg.tokenFile != null) cfg.tokenFile;
       };
     };
 
     # Systemd timer
-    systemd.user.timers.notes-export = {
+    systemd.user.timers.notes-exporter = {
       Unit = {
         Description = "Run notes export on schedule";
-        Requires = [ "notes-export.service" ];
+        Requires = [ "notes-exporter.service" ];
       };
 
       Timer = {

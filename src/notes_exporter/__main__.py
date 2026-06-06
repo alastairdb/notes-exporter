@@ -195,8 +195,7 @@ class NotesExporterSettings(BaseSettings):
     
     email: str | None = Field(
         default=None,
-        description="Google email address",
-        alias="email"
+        description="Google email address"
     )
     
     master_token: str | None = Field(
